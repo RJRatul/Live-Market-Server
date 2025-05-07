@@ -1,7 +1,7 @@
-import express from 'express';
-import { WebSocketServer, WebSocket } from 'ws'; // Modified import
-import http from 'http';
-import axios from 'axios';
+import express from "express";
+import { WebSocketServer, WebSocket } from "ws"; // Modified import
+import http from "http";
+import axios from "axios";
 
 const app = express();
 const server = http.createServer(app);
@@ -9,7 +9,7 @@ const wss = new WebSocketServer({ server });
 
 // Configuration
 const CANDLE_INTERVAL = 60000;
-const SYMBOL = 'USDJPY';
+const SYMBOL = "USDJPY";
 
 // MetaAPI configuration
 const auth_liveData = {
@@ -24,7 +24,7 @@ const api = axios.create({
     "auth-token": auth_liveData.token,
     "Content-Type": "application/json",
     Accept: "application/json",
-  }
+  },
 });
 
 // Server state
@@ -37,44 +37,48 @@ async function initializeHistoricalData() {
     const response = await api.get(
       `/users/current/accounts/${auth_liveData.accountId}/historical-market-data/symbols/${SYMBOL}/timeframes/1m/candles?limit=1000`
     );
-    
-    historicalData = response.data.map(c => ({
+
+    historicalData = response.data.map((c) => ({
       time: new Date(c.time).getTime(),
       open: c.open,
       high: c.high,
       low: c.low,
-      close: c.close
+      close: c.close,
     }));
-    
+
     console.log(`Loaded ${historicalData.length} historical candles`);
   } catch (error) {
-    console.error('Failed to load historical data:', error);
+    console.error("Failed to load historical data:", error);
     process.exit(1);
   }
 }
 
-wss.on('connection', (ws) => {
+wss.on("connection", (ws) => {
   connectedClients.add(ws);
-  
-  ws.send(JSON.stringify({
-    type: 'init',
-    data: historicalData,
-    currentCandle
-  }));
 
-  ws.on('close', () => {
+  ws.send(
+    JSON.stringify({
+      type: "init",
+      data: historicalData,
+      currentCandle,
+    })
+  );
+
+  ws.on("close", () => {
     connectedClients.delete(ws);
   });
 });
 
 function connectToMarketData() {
-  const traderMadeWs = new WebSocket('wss://marketdata.tradermade.com/feedadv');
+  const traderMadeWs = new WebSocket("wss://marketdata.tradermade.com/feedadv");
 
   traderMadeWs.onopen = () => {
-    traderMadeWs.send(JSON.stringify({
-      userKey: "wsCgVhfz2ZyK5qn8qUYQ",
-      symbol: SYMBOL
-    }));
+    traderMadeWs.send(
+      JSON.stringify({
+        userKey: "wsCgVhfz2ZyK5qn8qUYQ",
+        symbol: SYMBOL,
+      })
+    );
   };
 
   traderMadeWs.onmessage = (event) => {
@@ -84,11 +88,12 @@ function connectToMarketData() {
 
       const price = (parseFloat(tick.bid) + parseFloat(tick.ask)) / 2;
       const timestamp = Date.now();
-      const candleTime = Math.floor(timestamp / CANDLE_INTERVAL) * CANDLE_INTERVAL;
+      const candleTime =
+        Math.floor(timestamp / CANDLE_INTERVAL) * CANDLE_INTERVAL;
 
       if (!currentCandle || currentCandle.time !== candleTime) {
         if (currentCandle) {
-          historicalData.push({...currentCandle});
+          historicalData.push({ ...currentCandle });
           if (historicalData.length > 1000) historicalData.shift();
         }
 
@@ -97,7 +102,7 @@ function connectToMarketData() {
           open: price,
           high: price,
           low: price,
-          close: price
+          close: price,
         };
       } else {
         currentCandle.high = Math.max(currentCandle.high, price);
@@ -105,25 +110,28 @@ function connectToMarketData() {
         currentCandle.close = price;
       }
 
+const timeRemaining = CANDLE_INTERVAL - (timestamp - candleTime);
+
       const message = JSON.stringify({
-        type: 'update',
+        type: "update",
         candle: currentCandle,
         price,
-        timestamp
+        timestamp,
+        timeRemaining: Math.floor(timeRemaining / 1000)
       });
-
-      connectedClients.forEach(client => {
+      // console.log('Sending message:', message);
+      connectedClients.forEach((client) => {
         if (client.readyState === WebSocket.OPEN) {
           client.send(message);
         }
       });
     } catch (error) {
-      console.error('Error processing tick:', error);
+      console.error("Error processing tick:", error);
     }
   };
 
   traderMadeWs.onclose = () => {
-    console.log('Market data connection closed. Reconnecting...');
+    console.log("Market data connection closed. Reconnecting...");
     setTimeout(connectToMarketData, 5000);
   };
 }
@@ -131,7 +139,7 @@ function connectToMarketData() {
 async function start() {
   await initializeHistoricalData();
   connectToMarketData();
-  
+
   const PORT = process.env.PORT || 4000;
   server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
