@@ -6,7 +6,8 @@ import axios from "axios";
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
-
+const SMOOTHING_WINDOW_SIZE = 5; 
+const priceHistory = [];
 // Configuration
 const CANDLE_INTERVAL = 60000;
 const SYMBOL = "USDJPY";
@@ -85,41 +86,49 @@ function connectToMarketData() {
     try {
       const tick = JSON.parse(event.data);
       if (!tick?.bid || !tick?.ask) return;
-
-      const price = (parseFloat(tick.bid) + parseFloat(tick.ask)) / 2;
+  
+      // 1. Get raw price
+      const rawPrice = (parseFloat(tick.bid) + parseFloat(tick.ask)) / 2;
+      
+      // 2. Apply smoothing
+      priceHistory.push(rawPrice);
+      if (priceHistory.length > SMOOTHING_WINDOW_SIZE) priceHistory.shift();
+      const smoothedPrice = priceHistory.reduce((a, b) => a + b, 0) / priceHistory.length;
+  
+      // 3. Use smoothed price for candle updates
       const timestamp = Date.now();
-      const candleTime =
-        Math.floor(timestamp / CANDLE_INTERVAL) * CANDLE_INTERVAL;
-
+      const candleTime = Math.floor(timestamp / CANDLE_INTERVAL) * CANDLE_INTERVAL;
+  
       if (!currentCandle || currentCandle.time !== candleTime) {
         if (currentCandle) {
           historicalData.push({ ...currentCandle });
           if (historicalData.length > 1000) historicalData.shift();
         }
-
+  
         currentCandle = {
           time: candleTime,
-          open: price,
-          high: price,
-          low: price,
-          close: price,
+          open: smoothedPrice,
+          high: smoothedPrice,
+          low: smoothedPrice,
+          close: smoothedPrice,
         };
       } else {
-        currentCandle.high = Math.max(currentCandle.high, price);
-        currentCandle.low = Math.min(currentCandle.low, price);
-        currentCandle.close = price;
+        currentCandle.high = Math.max(currentCandle.high, smoothedPrice);
+        currentCandle.low = Math.min(currentCandle.low, smoothedPrice);
+        currentCandle.close = smoothedPrice;
       }
-
-const timeRemaining = CANDLE_INTERVAL - (timestamp - candleTime);
-
+  
+      // Rest of your existing code remains unchanged...
+      const timeRemaining = CANDLE_INTERVAL - (timestamp - candleTime);
+      
       const message = JSON.stringify({
         type: "update",
         candle: currentCandle,
-        price,
+        price: smoothedPrice, // Send smoothed price to clients
         timestamp,
         timeRemaining: Math.floor(timeRemaining / 1000)
       });
-      // console.log('Sending message:', message);
+  
       connectedClients.forEach((client) => {
         if (client.readyState === WebSocket.OPEN) {
           client.send(message);
